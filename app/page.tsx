@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Activity, ArrowRight, BarChart3, Database, FileCheck2, FolderUp, Pause, Play, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 import { Pitch } from "@/components/Pitch";
 import { BLOCKS, BlockTable, blockStats } from "@/components/BlockTable";
 import { processFiles } from "@/lib/process";
-import { deleteMatch, listMatches, saveMatch } from "@/lib/storage";
-import type { MatchRecord } from "@/lib/types";
+import { deleteMatch, listMatches, listPlayerProfiles, saveMatch, savePlayerProfiles } from "@/lib/storage";
+import { POSITION_OPTIONS, type MatchRecord, type PlayerProfile } from "@/lib/types";
 
 type Tab = "carga" | "analisis" | "comparar";
 
@@ -16,24 +16,26 @@ export default function Home() {
   const [second, setSecond] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(5);
-  const raf = useRef<number>(0), last = useRef(0);
+  const [profiles,setProfiles]=useState<PlayerProfile[]>([]);
   const refresh = () => listMatches().then(setMatches).catch(() => setMatches([]));
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); listPlayerProfiles().then(setProfiles).catch(()=>setProfiles([])); }, []);
   useEffect(() => {
     if (!playing || !current) return;
-    const tick = (now: number) => { if (!last.current) last.current = now; const delta = (now - last.current) / 1000 * speed; last.current = now; setSecond(s => s + delta >= current.duration ? 0 : s + delta); raf.current = requestAnimationFrame(tick); };
-    raf.current = requestAnimationFrame(tick); return () => { cancelAnimationFrame(raf.current); last.current = 0; };
+    const timer=window.setInterval(()=>setSecond(s=>s+1>current.duration?0:s+1),Math.max(50,1000/speed));
+    return ()=>window.clearInterval(timer);
   }, [playing, speed, current]);
-  const open = (m: MatchRecord) => { setCurrent(m); setSecond(0); setTab("analisis"); };
+  const applyProfiles=(m:MatchRecord)=>({...m,athletes:m.athletes.map(a=>({...a,position:profiles.find(p=>p.key===a.name.toLowerCase())?.position||a.position,isGoalkeeper:(profiles.find(p=>p.key===a.name.toLowerCase())?.position||a.position)==="ARQ"}))});
+  const open = (m: MatchRecord) => { setCurrent(applyProfiles(m)); setSecond(0); setTab("analisis"); };
+  const updatePositions=async (updated:MatchRecord)=>{setCurrent(updated);await saveMatch(updated);const ps=updated.athletes.map(a=>({key:a.name.toLowerCase(),displayName:a.name,position:a.position,updatedAt:new Date().toISOString()}));await savePlayerProfiles(ps);setProfiles(await listPlayerProfiles());await refresh()};
 
   return <main>
-    <header className="topbar"><div className="brand"><div className="mark">SV</div><div><strong>Campograma WCS</strong><span>Sports Scientist</span></div></div><nav>
+    <header className="topbar"><div className="brand"><img src="/escudo-union.png" alt="Escudo de Unión de Santa Fe"/><div><strong>Análisis de Partidos</strong><span>Reportes &amp; WCS Integrados</span></div></div><nav>
       <button className={tab === "carga" ? "active" : ""} onClick={() => setTab("carga")}><FolderUp /> 1. Cargar</button>
       <button className={tab === "analisis" ? "active" : ""} onClick={() => setTab("analisis")} disabled={!current}><Activity /> 2. Analizar</button>
       <button className={tab === "comparar" ? "active" : ""} onClick={() => setTab("comparar")}><BarChart3 /> 3. Comparar</button>
     </nav><div className="localBadge"><Database /> Guardado en este dispositivo</div></header>
     {tab === "carga" && <UploadSection matches={matches} onCreated={async m => { await saveMatch(m); await refresh(); open(m); }} onOpen={open} onDelete={async id => { await deleteMatch(id); refresh(); }} />}
-    {tab === "analisis" && current && <Analysis match={current} second={second} setSecond={setSecond} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />}
+    {tab === "analisis" && current && <Analysis match={current} onUpdatePositions={updatePositions} second={second} setSecond={setSecond} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />}
     {tab === "comparar" && <Compare matches={matches} />}
   </main>;
 }
@@ -57,16 +59,24 @@ function UploadSection({ matches, onCreated, onOpen, onDelete }: { matches: Matc
 
 function CsvGuide() { return <aside className="panel guide"><span className="eyebrow">FORMATO ESPERADO</span><h2>Antes de exportar</h2><div className="guideItem"><b>1</b><div><strong>Resumen por minuto</strong><p>Una fila por jugador y minuto. Debe contener Athlete/Jugador, Minute, Total Distance o Mts/min, Mts &gt;19, Mts &gt;24, A+D y Velocidad máxima.</p></div></div><div className="codeSample"><span>Athlete, Minute, Total Distance, Mts/min</span><span>L Menossi, 12, 118.4, 118.4</span></div><div className="guideItem"><b>2</b><div><strong>GPS individual</strong><p>Un CSV por jugador con Timestamp absoluto, Seconds, Velocity, Acceleration, Latitude, Longitude y Positional Quality.</p></div></div><div className="codeSample"><span>Timestamp, Seconds, Velocity, Latitude…</span><span>2026-08-23 18:02:01, 1, 12.4, -31…</span></div><div className="notice"><strong>Importante</strong><p>No mezcles entrenamientos u otros partidos. Usá el mismo período y zona horaria para todos los dispositivos.</p></div></aside> }
 
-function Analysis({ match, second, setSecond, playing, setPlaying, speed, setSpeed }: { match: MatchRecord; second: number; setSecond: (v: number) => void; playing: boolean; setPlaying: (v: boolean) => void; speed: number; setSpeed: (v: number) => void }) {
+function Analysis({ match, onUpdatePositions, second, setSecond, playing, setPlaying, speed, setSpeed }: { match: MatchRecord; onUpdatePositions:(m:MatchRecord)=>void; second: number; setSecond: (v: number) => void; playing: boolean; setPlaying: (v: boolean) => void; speed: number; setSpeed: (v: number) => void }) {
   const minute = Math.floor(second / 60) + 1, activeBlock = BLOCKS.findIndex(([a,b]) => minute >= a && minute <= b);
   const minuteRows = match.metrics.filter(m => m.minute === minute && m.position !== "ARQ").sort((a,b) => b.mtsMin-a.mtsMin);
   return <section className="page analysis"><div className="analysisHead"><div><span className="eyebrow">PARTIDO · {match.date}</span><h1>{match.name}</h1></div><div className="kpis"><div><span>Tiempo GPS</span><strong>{Math.floor(match.duration/60)}′</strong></div><div><span>Jugadores</span><strong>{match.athletes.length}</strong></div><div><span>Bloque activo</span><strong>{activeBlock >= 0 ? `${BLOCKS[activeBlock][0]}–${BLOCKS[activeBlock][1]}′` : "—"}</strong></div></div></div>
+    <PositionEditor match={match} onSave={onUpdatePositions}/>
     <Pitch match={match} second={Math.round(second)} />
-    <div className="controls"><button className="round" onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button><button onClick={() => setSecond(Math.max(0, second-5))}>−5 s</button><button onClick={() => setSecond(Math.max(0, second-1))}>−1 s</button><input aria-label="Tiempo" type="range" min="0" max={match.duration} value={second} onChange={e => setSecond(Number(e.target.value))}/><button onClick={() => setSecond(Math.min(match.duration, second+1))}>+1 s</button><button onClick={() => setSecond(Math.min(match.duration, second+5))}>+5 s</button><select value={speed} onChange={e => setSpeed(Number(e.target.value))}>{[1,2,5,10,20].map(x => <option key={x}>×{x}</option>)}</select><button className="round secondary" onClick={() => setSecond(0)}><RotateCcw /></button></div>
+    <div className="controls"><button className="round" onClick={() => setPlaying(!playing)}>{playing ? <Pause /> : <Play />}</button><button onClick={() => setSecond(Math.max(0, second-5))}>−5 s</button><button onClick={() => setSecond(Math.max(0, second-1))}>−1 s</button><input aria-label="Tiempo" type="range" min="0" max={match.duration} step="1" value={Math.round(second)} onChange={e => {setPlaying(false);setSecond(Number(e.target.value))}}/><button onClick={() => setSecond(Math.min(match.duration, second+1))}>+1 s</button><button onClick={() => setSecond(Math.min(match.duration, second+5))}>+5 s</button><select value={speed} onChange={e => setSpeed(Number(e.target.value))}>{[1,2,5,10,20].map(x => <option key={x} value={x}>×{x}</option>)}</select><button className="round secondary" onClick={() => {setPlaying(false);setSecond(0)}}><RotateCcw /></button></div>
     <div className="analysisGrid"><div className="panel"><h2>Tabla del minuto {minute}</h2><div className="tableScroll"><table><thead><tr><th>Jugador</th><th>POS</th><th>Mts/min</th><th>A+D</th><th>&gt;19</th><th>&gt;24</th><th>Vel. máx.</th></tr></thead><tbody>{minuteRows.map((r,i) => <tr key={r.athlete} className={i===0 ? "activeRow":""}><td>{r.athlete}</td><td>{r.position}</td><td>{r.mtsMin.toFixed(1)}</td><td>{r.ad.toFixed(1)}</td><td>{r.hs19.toFixed(1)}</td><td>{r.hs24.toFixed(1)}</td><td>{r.maxSpeed.toFixed(1)}</td></tr>)}</tbody></table></div></div><div className="panel"><h2>Control de calidad</h2>{match.warnings.length ? match.warnings.map(w => <p className="warning" key={w}>{w}</p>) : <p className="ok">Sin alertas críticas de estructura.</p>}<p className="sourceNote">Fuentes registradas: {match.sources.length}</p></div></div>
     <div className="panel blockPanel"><h2>Rendimiento colectivo por bloques</h2><p>Hacé clic en un bloque para llevar el reproductor a ese momento.</p><BlockTable match={match} active={activeBlock} onSelect={i => setSecond((BLOCKS[i][0]-1)*60)} /></div>
     <WcsTable match={match} />
   </section>;
+}
+
+function PositionEditor({match,onSave}:{match:MatchRecord;onSave:(m:MatchRecord)=>void}){
+  const [draft,setDraft]=useState(()=>Object.fromEntries(match.athletes.map(a=>[a.id,a.position])));
+  useEffect(()=>setDraft(Object.fromEntries(match.athletes.map(a=>[a.id,a.position]))),[match.id]);
+  const missing=match.athletes.filter(a=>(draft[a.id]||a.position)==="SIN POS.").length;
+  return <details className="panel positionEditor" open={missing>0}><summary><div><span className="eyebrow">PLANTEL DEL PARTIDO</span><h2>Asignar posiciones</h2></div><strong>{missing?`${missing} sin asignar`:"Posiciones completas"}</strong></summary><p>La posición queda guardada para próximos partidos y siempre puede modificarse.</p><div className="positionGrid">{match.athletes.map(a=><label key={a.id}><span>{a.name}</span><select value={draft[a.id]||a.position} onChange={e=>setDraft(v=>({...v,[a.id]:e.target.value}))}>{POSITION_OPTIONS.map(p=><option key={p} value={p}>{p}</option>)}</select></label>)}</div><button className="primary" onClick={()=>onSave({...match,athletes:match.athletes.map(a=>({...a,position:draft[a.id]||a.position,isGoalkeeper:(draft[a.id]||a.position)==="ARQ"}))})}><Save/> Guardar posiciones</button></details>
 }
 
 function WcsTable({ match }: { match: MatchRecord }) {
