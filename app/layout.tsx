@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Campograma WCS | SV Sports Scientist",
-  description: "Análisis físico interactivo de partidos con datos GPS Catapult OpenField."
+  title: "Análisis de Partidos | Unión de Santa Fe",
+  description: "Reportes y WCS integrados con datos GPS de partidos."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="es"><body>{children}</body></html>;
 }
+
