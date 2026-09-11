@@ -2,9 +2,10 @@ import { csvMetadata, keyOf, num, parseCsv } from "./csv";
 import type { Athlete, MatchRecord, MinuteMetric, Point } from "./types";
 
 const POSITIONS: Record<string, string> = {
-  "m mansilla": "ARQ", "mansilla": "ARQ", "b pitton": "DEF LAT I", "l ayala": "DEF LAT I", "j ludueña": "DEF CEN I", "m rodriguez": "DEF CEN D",
-  "l vargas": "DEF LAT D", "j pintado": "DEF LAT D", "m rocha": "DEF LAT D",
-  "c tarragona": "DEL", "m estigarribia": "DEL", "e ramirez": "DEL", "m aguirre": "DEL"
+  "mansilla":"ARQ", "pitton":"DEF LAT I", "ayala":"DEF LAT I", "ludueña":"DEF CEN I", "rodriguez":"DEF CEN D",
+  "vargas":"DEF LAT D", "pintado":"DEF LAT D", "rocha":"DEF LAT D", "malcorra":"MEDIO OF", "luna diale":"MEDIO OF",
+  "palacios":"MEDIO OF", "giaccone":"MEDIO CEN", "menossi":"MEDIO CEN", "mosqueira":"MEDIO CEN", "peresutti":"MEDIO CEN", "cuello":"MEDIO OF",
+  "tarragona":"DEL", "estigarribia":"DEL", "ramirez":"DEL", "aguirre":"DEL"
 };
 
 const clean = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_-]+/g, " ").replace(/\.(csv|txt)$/i, "").replace(/\s+/g, " ").trim();
@@ -104,7 +105,8 @@ function summaryMetrics(rows: ReturnType<typeof parseCsv>): MinuteMetric[] {
     const packedMinute = parsed ? Number(parsed[4]) : 0;
     const minute = parsed ? packedMinute + (/SEGUNDO/i.test(parsed[1]) ? 45 : 0) : Math.max(1, Math.round(num(minuteK ? r[minuteK] : i + 1)));
     const distance = num(distK ? r[distK] : 0);
-    return { minute, athlete: label(athlete), position: athletePosition(athlete), distance, mtsMin: num(rateK ? r[rateK] : distance), hs19: num(h19K ? r[h19K] : 0), hs24: num(h24K ? r[h24K] : 0), ad: num(accK ? r[accK] : 0), maxSpeed: num(maxK ? r[maxK] : 0) };
+    const half = parsed && /SEGUNDO/i.test(parsed[1]) ? "2T" : "1T";
+    return { minute, half:half as "1T"|"2T", periodMinute:parsed?packedMinute:minute, athlete: label(athlete), position: athletePosition(athlete), distance, mtsMin: num(rateK ? r[rateK] : distance), hs19: num(h19K ? r[h19K] : 0), hs24: num(h24K ? r[h24K] : 0), ad: num(accK ? r[accK] : 0), maxSpeed: num(maxK ? r[maxK] : 0) };
   }).filter(r => r.athlete && r.minute > 0 && r.mtsMin > 0);
 }
 
