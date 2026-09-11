@@ -2,9 +2,8 @@ import { csvMetadata, keyOf, num, parseCsv } from "./csv";
 import type { Athlete, MatchRecord, MinuteMetric, Point } from "./types";
 
 const POSITIONS: Record<string, string> = {
-  "m mansilla": "ARQ", "b pitton": "LI", "l ayala": "LI", "j ludueña": "DC", "m rodriguez": "DC",
-  "l vargas": "LD", "j pintado": "LD", "m rocha": "LD", "i malcorra": "MOI", "m luna diale": "MOI",
-  "j palacios": "MOD", "e giaccone": "MC", "l menossi": "MC", "j mosqueira": "MC", "b cuello": "MO",
+  "m mansilla": "ARQ", "mansilla": "ARQ", "b pitton": "DEF LAT I", "l ayala": "DEF LAT I", "j ludueña": "DEF CEN I", "m rodriguez": "DEF CEN D",
+  "l vargas": "DEF LAT D", "j pintado": "DEF LAT D", "m rocha": "DEF LAT D",
   "c tarragona": "DEL", "m estigarribia": "DEL", "e ramirez": "DEL", "m aguirre": "DEL"
 };
 
@@ -53,7 +52,7 @@ function gpsAthlete(file: File, text: string, warnings: string[]): Athlete | nul
   const lat0 = raw.reduce((a, p) => a + p.lat, 0) / raw.length;
   const lon0 = raw.reduce((a, p) => a + p.lon, 0) / raw.length;
   const cos = Math.cos(lat0 * Math.PI / 180);
-  const local = raw.map(p => ({ ...p, east: (p.lon - lon0) * 111320 * cos, north: (p.lat - lat0) * 110540 }));
+  const local = raw.map(p => ({ ...p, east: p.lon, north: p.lat }));
   const t0 = local[0].abs;
   // OpenField exporta a 10 Hz; se conserva un cuadro por segundo para el reproductor.
   const bySecond = new Map<number, typeof local[number]>();
@@ -65,6 +64,14 @@ function gpsAthlete(file: File, text: string, warnings: string[]): Athlete | nul
 function normalizePitch(athletes: Athlete[]) {
   const pts = athletes.flatMap(a => a.points);
   if (!pts.length) return;
+  // Un único origen y una única rotación para todos los dispositivos.
+  const lat0=pts.reduce((s,p)=>s+p.y,0)/pts.length, lon0=pts.reduce((s,p)=>s+p.x,0)/pts.length;
+  const cos=Math.cos(lat0*Math.PI/180);
+  const projected=pts.map(p=>({p,e:(p.x-lon0)*111320*cos,n:(p.y-lat0)*110540}));
+  const ce=projected.reduce((s,v)=>s+v.e,0)/projected.length, cn=projected.reduce((s,v)=>s+v.n,0)/projected.length;
+  let a=0,b=0,c=0; projected.forEach(v=>{const x=v.e-ce,y=v.n-cn;a+=x*x;b+=x*y;c+=y*y});
+  const angle=.5*Math.atan2(2*b,a-c), ca=Math.cos(angle), sa=Math.sin(angle);
+  projected.forEach(v=>{const x=v.e-ce,y=v.n-cn;v.p.x=x*ca+y*sa;v.p.y=-x*sa+y*ca});
   const xs = pts.map(p => p.x).sort((a, b) => a - b), ys = pts.map(p => p.y).sort((a, b) => a - b);
   const q = (arr: number[], f: number) => arr[Math.floor((arr.length - 1) * f)];
   const x0 = q(xs, .01), x1 = q(xs, .99), y0 = q(ys, .01), y1 = q(ys, .99);
