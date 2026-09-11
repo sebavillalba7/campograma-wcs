@@ -52,3 +52,9 @@ export type MatchRecord = {
   duration: number;
   warnings: string[];
 };
+
+export const POSITION_OPTIONS = [
+  "SIN POS.", "ARQ", "DEF CEN I", "DEF CEN D", "DEF LAT I", "DEF LAT D", "DEL"
+] as const;
+
+export type PlayerProfile = { key: string; displayName: string; position: string; updatedAt: string };
