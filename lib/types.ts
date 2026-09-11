@@ -19,6 +19,8 @@ export type Athlete = {
 
 export type MinuteMetric = {
   minute: number;
+  half?: "1T" | "2T";
+  periodMinute?: number;
   athlete: string;
   position: string;
   distance: number;
@@ -54,7 +56,7 @@ export type MatchRecord = {
 };
 
 export const POSITION_OPTIONS = [
-  "SIN POS.", "ARQ", "DEF CEN I", "DEF CEN D", "DEF LAT I", "DEF LAT D", "DEL"
+  "SIN POS.", "ARQ", "DEF CEN I", "DEF CEN D", "DEF LAT I", "DEF LAT D", "MEDIO CEN", "MEDIO OF", "DEL"
 ] as const;
 
 export type PlayerProfile = { key: string; displayName: string; position: string; updatedAt: string };
