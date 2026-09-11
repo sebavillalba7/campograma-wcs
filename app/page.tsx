@@ -1,13 +1,16 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Activity, ArrowRight, BarChart3, Database, FileCheck2, FolderUp, Pause, Play, RotateCcw, Save, Trash2, Upload } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Database, Download, FileCheck2, FolderUp, Pause, Play, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 import { Pitch } from "@/components/Pitch";
 import { BLOCKS, BlockTable, blockStats } from "@/components/BlockTable";
 import { processFiles } from "@/lib/process";
 import { deleteMatch, listMatches, listPlayerProfiles, saveMatch, savePlayerProfiles } from "@/lib/storage";
 import { POSITION_OPTIONS, type MatchRecord, type PlayerProfile } from "@/lib/types";
+import { calculateWcs, exportWcsExcel, WCS_WINDOWS } from "@/lib/wcs";
 
-type Tab = "carga" | "analisis" | "comparar";
+type Tab = "carga" | "analisis" | "comparar" | "exportar";
+const LEGACY_POSITIONS:Record<string,string>={MC:"MEDIO CEN",MO:"MEDIO OF",MOI:"MEDIO OF",MOD:"MEDIO OF",LI:"DEF LAT I",LD:"DEF LAT D",DC:"DEF CEN I"};
+const canonicalPosition=(p:string)=>LEGACY_POSITIONS[p]||p;
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("carga");
@@ -24,19 +27,21 @@ export default function Home() {
     const timer=window.setInterval(()=>setSecond(s=>s+1>current.duration?0:s+1),Math.max(50,1000/speed));
     return ()=>window.clearInterval(timer);
   }, [playing, speed, current]);
-  const applyProfiles=(m:MatchRecord)=>({...m,athletes:m.athletes.map(a=>({...a,position:profiles.find(p=>p.key===a.name.toLowerCase())?.position||a.position,isGoalkeeper:(profiles.find(p=>p.key===a.name.toLowerCase())?.position||a.position)==="ARQ"}))});
+  const applyProfiles=(m:MatchRecord)=>({...m,athletes:m.athletes.map(a=>{const metricRef=m.metrics.find(row=>a.name.split(" ").at(-1)===row.athlete.split(" ").at(-1))?.position;const position=canonicalPosition(profiles.find(p=>p.key===a.name.toLowerCase())?.position||(a.position!=="SIN POS."?a.position:metricRef)||"SIN POS.");return {...a,position,isGoalkeeper:position==="ARQ"}}),metrics:m.metrics.map(row=>{const athlete=m.athletes.find(a=>a.name.split(" ").at(-1)===row.athlete.split(" ").at(-1));const position=canonicalPosition((athlete&&profiles.find(p=>p.key===athlete.name.toLowerCase())?.position)||row.position);return {...row,position}})});
   const open = (m: MatchRecord) => { setCurrent(applyProfiles(m)); setSecond(0); setTab("analisis"); };
-  const updatePositions=async (updated:MatchRecord)=>{setCurrent(updated);await saveMatch(updated);const ps=updated.athletes.map(a=>({key:a.name.toLowerCase(),displayName:a.name,position:a.position,updatedAt:new Date().toISOString()}));await savePlayerProfiles(ps);setProfiles(await listPlayerProfiles());await refresh()};
+  const updatePositions=async (updated:MatchRecord)=>{const withMetrics={...updated,metrics:updated.metrics.map(row=>{const athlete=updated.athletes.find(a=>a.name.split(" ").at(-1)===row.athlete.split(" ").at(-1));return {...row,position:athlete?.position||row.position}})};setCurrent(withMetrics);await saveMatch(withMetrics);const ps=updated.athletes.map(a=>({key:a.name.toLowerCase(),displayName:a.name,position:a.position,updatedAt:new Date().toISOString()}));await savePlayerProfiles(ps);setProfiles(await listPlayerProfiles());await refresh()};
 
   return <main>
     <header className="topbar"><div className="brand"><img src="/escudo-union.png" alt="Escudo de Unión de Santa Fe"/><div><strong>Análisis de Partidos</strong><span>Reportes &amp; WCS Integrados</span></div></div><nav>
       <button className={tab === "carga" ? "active" : ""} onClick={() => setTab("carga")}><FolderUp /> 1. Cargar</button>
       <button className={tab === "analisis" ? "active" : ""} onClick={() => setTab("analisis")} disabled={!current}><Activity /> 2. Analizar</button>
       <button className={tab === "comparar" ? "active" : ""} onClick={() => setTab("comparar")}><BarChart3 /> 3. Comparar</button>
+      <button className={tab === "exportar" ? "active" : ""} onClick={() => setTab("exportar")}><Download /> 4. Exportar</button>
     </nav><div className="localBadge"><Database /> Guardado en este dispositivo</div></header>
     {tab === "carga" && <UploadSection matches={matches} onCreated={async m => { await saveMatch(m); await refresh(); open(m); }} onOpen={open} onDelete={async id => { await deleteMatch(id); refresh(); }} />}
     {tab === "analisis" && current && <Analysis match={current} onUpdatePositions={updatePositions} second={second} setSecond={setSecond} playing={playing} setPlaying={setPlaying} speed={speed} setSpeed={setSpeed} />}
     {tab === "comparar" && <Compare matches={matches} />}
+    {tab === "exportar" && <ExportSection matches={matches.map(applyProfiles)} />}
   </main>;
 }
 
@@ -107,3 +112,9 @@ function Compare({ matches }: { matches: MatchRecord[] }) {
 }
 
 function ComparisonTable({left,right,block}:{left:MatchRecord;right:MatchRecord;block:number}) { const a=blockStats(left,block), b=blockStats(right,block); const diff=(x:number,y:number)=>x?((y-x)/x*100):0; return <div className="panel"><h2>Comparación del bloque</h2><div className="tableScroll"><table><thead><tr><th>Métrica</th><th>{left.opponent}</th><th>{right.opponent}</th><th>Dif. %</th></tr></thead><tbody><tr><td>Mts/min promedio</td><td>{a.mts.toFixed(1)}</td><td>{b.mts.toFixed(1)}</td><td>{diff(a.mts,b.mts).toFixed(1)}%</td></tr><tr><td>Mts &gt;19 promedio</td><td>{a.h19.toFixed(1)}</td><td>{b.h19.toFixed(1)}</td><td>{diff(a.h19,b.h19).toFixed(1)}%</td></tr><tr><td>Mts &gt;24 promedio</td><td>{a.h24.toFixed(1)}</td><td>{b.h24.toFixed(1)}</td><td>{diff(a.h24,b.h24).toFixed(1)}%</td></tr></tbody></table></div></div> }
+
+function ExportSection({matches}:{matches:MatchRecord[]}){
+  const [id,setId]=useState(matches[0]?.id||""); const [busy,setBusy]=useState(false); const match=matches.find(m=>m.id===id); const data=match?calculateWcs(match):null;
+  const run=async()=>{if(!match)return;setBusy(true);try{await exportWcsExcel(match)}finally{setBusy(false)}};
+  return <section className="page exportPage"><div className="intro small"><span className="eyebrow">EXPORTACIÓN WCS</span><h1>Ventanas pico listas para trabajar.</h1><p>El cálculo aplica rolling average minuto a minuto, excluye al arquero y no permite que una ventana cruce entre tiempos ni discontinuidades.</p></div><div className="panel exportChooser"><label>Seleccionar partido<select value={id} onChange={e=>setId(e.target.value)}><option value="">Elegir partido</option>{matches.map(m=><option key={m.id} value={m.id}>{m.name} · {m.date}</option>)}</select></label>{match&&<button className="primary" disabled={busy} onClick={run}><Download/>{busy?"Generando Excel…":"Descargar Excel WCS"}</button>}</div>{match&&data&&<><div className="wcsCards">{WCS_WINDOWS.map(w=><article key={w}><span>VENTANA</span><strong>{w}′</strong><p>Promedio móvil máximo</p></article>)}</div><div className="panel"><h2>Vista previa · Equipo</h2><p>Promedio de los jugadores de campo activos en cada minuto completo.</p><div className="tableScroll"><table><thead><tr><th>Ventana</th><th>Métrica</th><th>Rolling máx.</th><th>Inicio</th><th>Final</th><th>Tiempo</th></tr></thead><tbody>{data.team.map((r,i)=><tr key={i}><td>{r.window}′</td><td>{r.metric}</td><td>{r.value.toFixed(2)}</td><td>{r.startMinute}′</td><td>{r.endMinute}′</td><td>{r.half}</td></tr>)}</tbody></table></div></div><div className="exportInfo"><div><strong>Equipo</strong><span>{data.team.length} resultados</span></div><div><strong>Jugadores</strong><span>{data.players.length} resultados</span></div><div><strong>Minutos válidos</strong><span>{data.validMinutes.length} jugadores</span></div></div><p className="methodNote">El archivo contiene las hojas <b>Equipo</b>, <b>Jugadores</b> y <b>Minutos válidos</b>. Las métricas exportadas son Mts/min, Mts &gt;19/min y A+D &gt;2,5/min.</p></>}{!match&&<div className="empty large">Seleccioná un partido guardado para calcular y exportar sus WCS.</div>}</section>
+}
